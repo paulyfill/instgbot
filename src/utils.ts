@@ -1002,7 +1002,11 @@ export const processSocialMedia = async (
 
   try {
     const formattedMessage = handleUnderlineEnding(message);
-    const download = await snapsave(formattedMessage);
+    const download = await snapsave(formattedMessage, {
+      retry: 3,
+      retryDelay: 500,
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+    });
 
     if (!download.success) {
       // Если это Twitter/X и snapsave не сработал, пробуем конвертировать в изображение

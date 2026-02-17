@@ -41,7 +41,7 @@
     "btch-downloader": "^4.0.9",
     "input": "^1.0.1",
     "node-telegram-bot-api": "^0.66.0",
-    "snapsave-media-downloader": "^2.2.1",
+    "snapsave-media-downloader": "^2.4.0",
     "telegram": "^2.26.22"
   },
   "packageManager": "pnpm@9.14.4"
