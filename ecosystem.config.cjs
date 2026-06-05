@@ -3,6 +3,7 @@ module.exports = {
     {
       name: "instgbot",
       script: "./start.sh",
+      interpreter: "/bin/bash",
       cwd: "/root/instgbot",
       interpreter: "/bin/bash",
       watch: false,
