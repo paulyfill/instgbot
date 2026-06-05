@@ -4,6 +4,7 @@ module.exports = {
       name: "instgbot",
       script: "./start.sh",
       cwd: "/root/instgbot",
+      interpreter: "/bin/bash",
       watch: false,
       max_memory_restart: "500M",
       env: {
