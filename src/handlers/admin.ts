@@ -6,10 +6,11 @@ import {
   getRecentErrors,
   getStats,
   getTopUsers,
-  getUsers,
-  recordError
-} from "./database";
-import { ADMIN_USER_IDS, BOT_TAG, isAdmin, safeSendMessage, splitMessage } from "./utils";
+  getUsers
+} from "../db/queries";
+import { ADMIN_USER_IDS, BOT_TAG, isAdmin } from "../config";
+import { safeSendMessage } from "../bot/safe-send";
+import { splitMessage } from "../utils/messages";
 
 // Admin commands handler
 export const handleAdminCommands = async (

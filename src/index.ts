@@ -1,33 +1,20 @@
 import TelegramBot from "node-telegram-bot-api";
-import { handleAdminCommands } from "./admin";
-import { upsertUser } from "./database";
-import {
-  BOT_TAG,
-  checkRateLimit,
-  checkTelegramStoriesRateLimit,
-  helpMessage,
-  isAdmin,
-  isTelegramLink,
-  isThreadsLink,
-  isYoutubeLink,
-  isYoutubeShortsLink,
-  notifyAdmins,
-  parseTelegramLink,
-  processFeatureRequest,
-  processNewsletterToggle,
-  processSocialMedia,
-  processThreads,
-  processYouTubeShorts,
-  safeSendMessage,
-  sendErrorToAdmin,
-  sendRateLimitMessage,
-  shutdown
-} from "./utils";
+import { handleAdminCommands } from "./handlers/admin";
+import { upsertUser } from "./db/queries";
+import { BOT_TAG, isAdmin } from "./config";
+import { safeSendMessage } from "./bot/safe-send";
+import { sendErrorToAdmin } from "./bot/errors";
+import { checkRateLimit, checkTelegramStoriesRateLimit, sendRateLimitMessage } from "./bot/rate-limit";
+import { isTelegramLink, isThreadsLink, isYoutubeLink, isYoutubeShortsLink, parseTelegramLink } from "./media/platform";
+import { processSocialMedia } from "./handlers/social-media";
+import { processThreads } from "./handlers/threads";
+import { processYouTubeShorts } from "./handlers/youtube";
+import { helpMessage, notifyAdmins, processFeatureRequest, processNewsletterToggle, shutdown } from "./utils/messages";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 // @ts-ignore - no types available
 import input from "input";
-import { downloadStories, downloadStoryById, downloadTelegramPost, downloadPrivateTelegramPost } from "./telegramStories";
+import { downloadPrivateTelegramPost, downloadStories, downloadStoryById, downloadTelegramPost } from "./handlers/telegram";
 
 const token = Bun.env.TELEGRAM_BOT!;
 Bun.env.NTBA_FIX_350 = "1";
@@ -130,7 +117,8 @@ bot.onText(/(.+)/, async (msg, match) => {
     try {
       if (isTelegramUsername) {
         await downloadStories({ userClient, bot, username: message.slice(1), chatId });
-      } else {
+      }
+      else {
         const parsed = parseTelegramLink(message);
         if (!parsed) {
           await safeSendMessage(bot, chatId, "Не удалось распознать ссылку Telegram.");
@@ -138,11 +126,14 @@ bot.onText(/(.+)/, async (msg, match) => {
         }
         if (parsed.type === "private_post") {
           await downloadPrivateTelegramPost({ userClient, bot, channelId: parsed.channelId, messageId: parsed.messageId, chatId });
-        } else if (parsed.type === "story") {
+        }
+        else if (parsed.type === "story") {
           await downloadStoryById({ userClient, bot, username: parsed.username, storyId: parsed.id, chatId });
-        } else if (parsed.type === "post") {
+        }
+        else if (parsed.type === "post") {
           await downloadTelegramPost({ userClient, bot, username: parsed.username, postId: parsed.id, chatId });
-        } else {
+        }
+        else {
           await downloadStories({ userClient, bot, username: parsed.username, chatId });
         }
       }

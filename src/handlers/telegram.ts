@@ -1,7 +1,9 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BOT_TAG, FileTooLargeError, safeDeleteMessage, safeSendMediaGroup, safeSendMessage, safeSendPhoto, safeSendVideo, sendErrorToAdmin } from "./utils";
+import { BOT_TAG } from "../config";
+import { safeDeleteMessage, safeSendMediaGroup, safeSendMessage, safeSendPhoto, safeSendVideo } from "../bot/safe-send";
+import { FileTooLargeError, sendErrorToAdmin } from "../bot/errors";
 import { Api } from "telegram";
-import { recordDownload } from "./database";
+import { recordDownload } from "../db/queries";
 
 export async function downloadStoryById ({
   userClient,
@@ -48,14 +50,16 @@ export async function downloadStoryById ({
     const mediaClassName = ("className" in story.media) ? story.media.className : "";
     if (mediaClassName === "MessageMediaPhoto") {
       await safeSendPhoto(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true });
-    } else {
+    }
+    else {
       await safeSendVideo(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true });
     }
 
     if (loadingMsg) await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
     recordDownload(chatId, `t.me/${username}/s/${storyId}`, "telegram", "story", true, username);
     return true;
-  } catch (error: any) {
+  }
+  catch (error: any) {
     if (loadingMsg) await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
     await safeSendMessage(bot, chatId, `Ошибка при загрузке сторис. Попробуйте позже.\n${BOT_TAG}`);
     await sendErrorToAdmin(bot, error, "telegram stories download", undefined, chatId, username);
@@ -105,7 +109,8 @@ const sendPostMedia = async (
     const cls = withMedia[0].media?.className ?? "";
     if (cls === "MessageMediaPhoto") {
       await safeSendPhoto(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true });
-    } else {
+    }
+    else {
       await safeSendVideo(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true });
     }
     return true;
@@ -163,7 +168,8 @@ export async function downloadTelegramPost ({
     if (loadingMsg) await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
     recordDownload(chatId, `t.me/${username}/${postId}`, "telegram", "post", sent, username);
     return sent;
-  } catch (error: any) {
+  }
+  catch (error: any) {
     if (loadingMsg) await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
     if (isNoAccessError(error)) {
       await safeSendMessage(bot, chatId, `Нет доступа к каналу @${username}. Возможно, канал приватный.\n${BOT_TAG}`);
@@ -208,7 +214,8 @@ export async function downloadPrivateTelegramPost ({
     if (loadingMsg) await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
     recordDownload(chatId, `t.me/c/${channelId}/${messageId}`, "telegram", "post", sent);
     return sent;
-  } catch (error: any) {
+  }
+  catch (error: any) {
     if (loadingMsg) await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
     if (isNoAccessError(error)) {
       await safeSendMessage(bot, chatId, `Нет доступа к этому каналу. Возможно, бот не является участником или канал приватный.\n${BOT_TAG}`);
@@ -254,7 +261,8 @@ export async function downloadStories ({
       const withCaption = batch.map((item, idx) => idx === 0 ? { ...item, caption: BOT_TAG } : item);
       try {
         await safeSendMediaGroup(bot, chatId, withCaption);
-      } catch (e) {
+      }
+      catch (e) {
         await sendErrorToAdmin(bot, e, context, undefined, chatId, username);
       }
       batch.length = 0;
@@ -267,10 +275,12 @@ export async function downloadStories ({
         const mediaResult = await userClient.downloadMedia(story.media);
         if (Buffer.isBuffer(mediaResult)) fileBuffer = mediaResult;
         else continue;
-      } catch (e: any) {
+      }
+      catch (e: any) {
         if (e instanceof FileTooLargeError) {
           await safeSendMessage(bot, chatId, `Сторис слишком большой для загрузки (максимум 50MB).\n${BOT_TAG}`);
-        } else {
+        }
+        else {
           await sendErrorToAdmin(bot, e, "telegram stories download", undefined, chatId, username);
         }
         continue;
@@ -282,7 +292,8 @@ export async function downloadStories ({
         photoBatch.push({ type: "photo", media: fileBuffer as any });
         successCount++;
         if (photoBatch.length === 10) await flushBatch(photoBatch, "sendMediaGroup photos");
-      } else if (mediaClassName === "MessageMediaDocument") {
+      }
+      else if (mediaClassName === "MessageMediaDocument") {
         videoBatch.push({ type: "video", media: fileBuffer as any });
         successCount++;
         if (videoBatch.length === 10) await flushBatch(videoBatch, "sendMediaGroup videos");
