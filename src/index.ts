@@ -1,15 +1,18 @@
 import TelegramBot from "node-telegram-bot-api";
 import { handleAdminCommands } from "./admin";
-import { updateUserActivity, upsertUser } from "./database";
+import { upsertUser } from "./database";
 import {
   BOT_TAG,
   checkRateLimit,
   checkTelegramStoriesRateLimit,
   helpMessage,
   isAdmin,
+  isTelegramLink,
   isThreadsLink,
+  isYoutubeLink,
   isYoutubeShortsLink,
   notifyAdmins,
+  parseTelegramLink,
   processFeatureRequest,
   processNewsletterToggle,
   processSocialMedia,
@@ -24,7 +27,7 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 // @ts-ignore - no types available
 import input from "input";
-import { downloadStories } from "./telegramStories";
+import { downloadStories, downloadStoryById, downloadTelegramPost, downloadPrivateTelegramPost } from "./telegramStories";
 
 const token = Bun.env.TELEGRAM_BOT!;
 Bun.env.NTBA_FIX_350 = "1";
@@ -53,7 +56,7 @@ bot.onText(/\/start/, async (msg) => {
       "",
       "Я могу:",
       "",
-      "• скачивать активные сторис с Telegram (@username)",
+      "• скачивать сторис и посты из Telegram (@username или ссылка t.me/...)",
       "• скачивать рилсы, посты и сторис с Instagram",
       "• скачивать посты, видео и изображения из Twitter (X)",
       "• скачивать посты из Threads (картинки и видео)",
@@ -111,28 +114,41 @@ bot.onText(/(.+)/, async (msg, match) => {
     return;
   }
 
-  if (isTelegramUsername) {
+  const isTelegramUrl = isValidUrl && isTelegramLink(message);
+
+  if (isTelegramUsername || isTelegramUrl) {
     const rateLimit = checkTelegramStoriesRateLimit(userId ?? chatId);
     if (!rateLimit.allowed) {
       const minutesLeft = Math.ceil((rateLimit.resetTime - Date.now()) / 60000);
       await safeSendMessage(
         bot,
         chatId,
-        `⚡ Лимит: 1 запрос на сторис раз в 3 минуты. Попробуйте снова через ${minutesLeft} мин.`
+        `⚡ Лимит: 1 запрос раз в 3 минуты. Попробуйте снова через ${minutesLeft} мин.`
       );
       return;
     }
     try {
-      const username = message.slice(1);
-      await downloadStories({
-        userClient,
-        bot,
-        username,
-        chatId
-      });
+      if (isTelegramUsername) {
+        await downloadStories({ userClient, bot, username: message.slice(1), chatId });
+      } else {
+        const parsed = parseTelegramLink(message);
+        if (!parsed) {
+          await safeSendMessage(bot, chatId, "Не удалось распознать ссылку Telegram.");
+          return;
+        }
+        if (parsed.type === "private_post") {
+          await downloadPrivateTelegramPost({ userClient, bot, channelId: parsed.channelId, messageId: parsed.messageId, chatId });
+        } else if (parsed.type === "story") {
+          await downloadStoryById({ userClient, bot, username: parsed.username, storyId: parsed.id, chatId });
+        } else if (parsed.type === "post") {
+          await downloadTelegramPost({ userClient, bot, username: parsed.username, postId: parsed.id, chatId });
+        } else {
+          await downloadStories({ userClient, bot, username: parsed.username, chatId });
+        }
+      }
     }
     catch (e) {
-      await bot.sendMessage(chatId, "Не удалось загрузить сторис.");
+      await safeSendMessage(bot, chatId, "Не удалось загрузить контент.");
       console.error(e);
     }
     return;
@@ -140,7 +156,6 @@ bot.onText(/(.+)/, async (msg, match) => {
 
   try {
     upsertUser(chatId, username, firstName);
-    updateUserActivity(chatId);
 
     if (isAdmin(userId)) {
       const handled = await handleAdminCommands(bot, chatId, message, userId);
@@ -158,6 +173,9 @@ bot.onText(/(.+)/, async (msg, match) => {
 
     if (isYoutubeShortsLink(message)) {
       await processYouTubeShorts(bot, chatId, message, username, firstName);
+    }
+    else if (isYoutubeLink(message)) {
+      await safeSendMessage(bot, chatId, `Поддерживаются только YouTube Shorts.\nОбычные YouTube видео скачать нельзя.\n\n${BOT_TAG}`);
     }
     else if (isThreadsLink(message)) {
       await processThreads(bot, chatId, message, username, firstName);

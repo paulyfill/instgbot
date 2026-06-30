@@ -45,58 +45,21 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users (chat_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_downloads_user_id ON downloads (user_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_errors_user_id ON errors (user_id)");
 
-// Add newsletter column to existing users if it doesn't exist
-try {
-  db.exec(`
-    ALTER TABLE users ADD COLUMN newsletter BOOLEAN DEFAULT 1
-  `);
-}
-catch (error) {
-  // Column already exists, ignore the error
-}
-
 export const upsertUser = (chatId: number, username?: string, firstName?: string): number => {
   const now = new Date().toISOString();
 
   try {
-    const existingUser = db.query("SELECT id FROM users WHERE chat_id = ?").get(chatId) as { id: number } | undefined;
-    if (existingUser?.id) {
-      db.query(`
-        UPDATE users 
-        SET username = ?, first_name = ?, last_activity = ?
-        WHERE chat_id = ?
-      `).run(username || null, firstName || null, now, chatId);
-      return existingUser.id;
+    const existing = db.query("SELECT id FROM users WHERE chat_id = ?").get(chatId) as { id: number } | undefined;
+    if (existing?.id) {
+      db.query("UPDATE users SET username = ?, first_name = ?, last_activity = ? WHERE chat_id = ?")
+        .run(username || null, firstName || null, now, chatId);
+      return existing.id;
     }
-    else {
-      const result = db.query(`
-        INSERT INTO users (username, first_name, chat_id, first_seen, last_activity)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(username || null, firstName || null, chatId, now, now);
-
-
-      if (!result) {
-        throw new Error("Database insert returned null/undefined result");
-      }
-
-      if (typeof result !== "object") {
-        throw new Error(`Database insert returned unexpected type: ${typeof result}`);
-      }
-
-      if (!("lastInsertRowid" in result)) {
-        throw new Error("Database insert result missing lastInsertRowid property");
-      }
-
-      if (typeof result.lastInsertRowid !== "number" && typeof result.lastInsertRowid !== "bigint") {
-        throw new Error(`Invalid lastInsertRowid type: ${typeof result.lastInsertRowid}, value: ${result.lastInsertRowid}`);
-      }
-
-      return Number(result.lastInsertRowid);
-    }
-  }
-  catch (error) {
-    console.error("Database error in upsertUser:", error);
-    console.error("Parameters:", { chatId, username, firstName, now });
+    const result = db.query("INSERT INTO users (username, first_name, chat_id, first_seen, last_activity) VALUES (?, ?, ?, ?, ?)")
+      .run(username || null, firstName || null, chatId, now, now);
+    return Number(result.lastInsertRowid);
+  } catch (error) {
+    console.error("Database error in upsertUser:", { chatId, username, firstName, error });
     throw error;
   }
 };
@@ -157,7 +120,7 @@ export const detectPlatform = (url: string): string => {
   if (url.includes("twitter.com") || url.includes("x.com")) return "twitter";
   if (url.includes("youtube.com") || url.includes("youtu.be")) return "youtube";
   if (url.includes("threads.com")) return "threads";
-  if (url.startsWith("@")) return "telegram";
+  if (url.startsWith("@") || url.includes("t.me/")) return "telegram";
   return "unknown";
 };
 
@@ -229,40 +192,6 @@ export const getAllUsers = (): Array<{ chat_id: number, username?: string, first
     WHERE newsletter = 1
     ORDER BY last_activity DESC
   `).all() as Array<{ chat_id: number, username?: string, first_name?: string }>;
-};
-
-// Utility function to split long messages for Telegram
-export const splitMessage = (text: string, maxLength: number = 4096): string[] => {
-  if (text.length <= maxLength) {
-    return [text];
-  }
-
-  const chunks: string[] = [];
-  let currentChunk = "";
-  const lines = text.split("\n");
-
-  for (const line of lines) {
-    if (currentChunk.length + line.length + 1 > maxLength) {
-      if (currentChunk) {
-        chunks.push(currentChunk);
-        currentChunk = line;
-      }
-      else {
-        // Single line is too long, split it
-        chunks.push(line.substring(0, maxLength));
-        currentChunk = line.substring(maxLength);
-      }
-    }
-    else {
-      currentChunk += (currentChunk ? "\n" : "") + line;
-    }
-  }
-
-  if (currentChunk) {
-    chunks.push(currentChunk);
-  }
-
-  return chunks;
 };
 
 // Toggle newsletter subscription for user

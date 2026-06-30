@@ -7,10 +7,9 @@ import {
   getStats,
   getTopUsers,
   getUsers,
-  recordError,
-  splitMessage
+  recordError
 } from "./database";
-import { ADMIN_USER_IDS, BOT_TAG, isAdmin, safeSendMessage } from "./utils";
+import { ADMIN_USER_IDS, BOT_TAG, isAdmin, safeSendMessage, splitMessage } from "./utils";
 
 // Admin commands handler
 export const handleAdminCommands = async (

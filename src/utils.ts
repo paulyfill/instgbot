@@ -119,7 +119,25 @@ export class FileTooLargeError extends Error {
   }
 }
 
-// Функция для безопасной отправки сообщений с обработкой блокировки
+export class MediaFetchError extends Error {
+  constructor (reason: string) {
+    super(reason);
+    this.name = "MediaFetchError";
+  }
+}
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+
+export const isBotBlockedError = (error: any): boolean => {
+  const msg: string = error && typeof error === "object" ? error.message || String(error) : String(error);
+  return (
+    msg.includes("bot was blocked by the user") ||
+    msg.includes("user is deactivated") ||
+    msg.includes("chat not found") ||
+    msg.includes("ETELEGRAM: 403 Forbidden")
+  );
+};
+
 export const safeSendMessage = async (
   bot: TelegramBot,
   chatId: number,
@@ -128,25 +146,12 @@ export const safeSendMessage = async (
 ): Promise<TelegramBot.Message | null> => {
   try {
     return await bot.sendMessage(chatId, text, options);
-  }
-  catch (error: any) {
-    const errorMessage =
-      error && typeof error === "object"? error.message || String(error): String(error);
-
-    if (
-      errorMessage.includes("bot was blocked by the user") ||
-      errorMessage.includes("user is deactivated") ||
-      errorMessage.includes("chat not found") ||
-      errorMessage.includes("ETELEGRAM: 403 Forbidden")
-    ) {
-      return null;
-    }
-
+  } catch (error: any) {
+    if (isBotBlockedError(error)) return null;
     throw error;
   }
 };
 
-// Функция для безопасной отправки видео
 export const safeSendVideo = async (
   bot: TelegramBot,
   chatId: number,
@@ -155,25 +160,12 @@ export const safeSendVideo = async (
 ): Promise<TelegramBot.Message | null> => {
   try {
     return await bot.sendVideo(chatId, video, options);
-  }
-  catch (error: any) {
-    const errorMessage =
-      error && typeof error === "object"? error.message || String(error): String(error);
-
-    if (
-      errorMessage.includes("bot was blocked by the user") ||
-      errorMessage.includes("user is deactivated") ||
-      errorMessage.includes("chat not found") ||
-      errorMessage.includes("ETELEGRAM: 403 Forbidden")
-    ) {
-      return null;
-    }
-
+  } catch (error: any) {
+    if (isBotBlockedError(error)) return null;
     throw error;
   }
 };
 
-// Функция для безопасной отправки фото
 export const safeSendPhoto = async (
   bot: TelegramBot,
   chatId: number,
@@ -182,25 +174,12 @@ export const safeSendPhoto = async (
 ): Promise<TelegramBot.Message | null> => {
   try {
     return await bot.sendPhoto(chatId, photo, options);
-  }
-  catch (error: any) {
-    const errorMessage =
-      error && typeof error === "object"? error.message || String(error): String(error);
-
-    if (
-      errorMessage.includes("bot was blocked by the user") ||
-      errorMessage.includes("user is deactivated") ||
-      errorMessage.includes("chat not found") ||
-      errorMessage.includes("ETELEGRAM: 403 Forbidden")
-    ) {
-      return null;
-    }
-
+  } catch (error: any) {
+    if (isBotBlockedError(error)) return null;
     throw error;
   }
 };
 
-// Функция для безопасной отправки медиа группы
 export const safeSendMediaGroup = async (
   bot: TelegramBot,
   chatId: number,
@@ -209,25 +188,12 @@ export const safeSendMediaGroup = async (
 ): Promise<TelegramBot.Message[] | null> => {
   try {
     return await bot.sendMediaGroup(chatId, media, options);
-  }
-  catch (error: any) {
-    const errorMessage =
-      error && typeof error === "object"? error.message || String(error): String(error);
-
-    if (
-      errorMessage.includes("bot was blocked by the user") ||
-      errorMessage.includes("user is deactivated") ||
-      errorMessage.includes("chat not found") ||
-      errorMessage.includes("ETELEGRAM: 403 Forbidden")
-    ) {
-      return null;
-    }
-
+  } catch (error: any) {
+    if (isBotBlockedError(error)) return null;
     throw error;
   }
 };
 
-// Функция для безопасного удаления сообщения
 export const safeDeleteMessage = async (
   bot: TelegramBot,
   chatId: number,
@@ -235,49 +201,109 @@ export const safeDeleteMessage = async (
 ): Promise<boolean> => {
   try {
     return await bot.deleteMessage(chatId, messageId);
-  }
-  catch (error: any) {
-    const errorMessage =
-      error && typeof error === "object"? error.message || String(error): String(error);
-
-    if (
-      errorMessage.includes("bot was blocked by the user") ||
-      errorMessage.includes("user is deactivated") ||
-      errorMessage.includes("chat not found") ||
-      errorMessage.includes("ETELEGRAM: 403 Forbidden")
-    ) {
-      return false;
-    }
+  } catch (error: any) {
     return false;
   }
 };
 
+const fetchWithTimeout = (url: string, timeoutMs = 30_000, options?: RequestInit): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
 export const downloadBuffer = async (url: string): Promise<Buffer> => {
-  const response = await fetch(url);
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(url);
+  } catch (e: any) {
+    const msg: string = e?.message || String(e);
+    if (msg.includes("redirected too many times") || msg.includes("redirect")) {
+      throw new MediaFetchError("Ссылка содержит слишком много перенаправлений.");
+    }
+    if (e?.name === "AbortError") {
+      throw new MediaFetchError("Превышено время ожидания загрузки файла.");
+    }
+    throw e;
+  }
+
+  if (!response.ok) {
+    throw new MediaFetchError(`Сервер вернул ошибку ${response.status}.`);
+  }
 
   const contentLength = response.headers.get("content-length");
-  if (contentLength) {
-    const size = parseInt(contentLength);
-    const maxSize = 50 * 1024 * 1024;
-    if (size > maxSize) {
-      throw new FileTooLargeError(size);
-    }
+  if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
+    throw new FileTooLargeError(parseInt(contentLength));
   }
 
   const arrayBuffer = await response.arrayBuffer();
-
-  const maxSize = 50 * 1024 * 1024;
-  if (arrayBuffer.byteLength > maxSize) {
+  if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
     throw new FileTooLargeError(arrayBuffer.byteLength);
   }
 
   return Buffer.from(arrayBuffer);
 };
 
+export const splitMessage = (text: string, maxLength: number = 4096): string[] => {
+  if (text.length <= maxLength) return [text];
+
+  const chunks: string[] = [];
+  let currentChunk = "";
+
+  for (const line of text.split("\n")) {
+    if (currentChunk.length + line.length + 1 > maxLength) {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+        currentChunk = line;
+      } else {
+        chunks.push(line.substring(0, maxLength));
+        currentChunk = line.substring(maxLength);
+      }
+    } else {
+      currentChunk += (currentChunk ? "\n" : "") + line;
+    }
+  }
+
+  if (currentChunk) chunks.push(currentChunk);
+  return chunks;
+};
+
 export const isYoutubeShortsLink = (url: string): boolean => {
-  return (
-    url.includes("youtube.com/shorts/") || url.includes("youtu.be/shorts/")
-  );
+  return url.includes("youtube.com/shorts/");
+};
+
+export const isYoutubeLink = (url: string): boolean => {
+  return url.includes("youtube.com/") || url.includes("youtu.be/");
+};
+
+export type TelegramLinkInfo =
+  | { type: "story"; username: string; id: number }
+  | { type: "post"; username: string; id: number }
+  | { type: "private_post"; channelId: bigint; messageId: number }
+  | { type: "stories_all"; username: string };
+
+export const parseTelegramLink = (url: string): TelegramLinkInfo | null => {
+  // https://t.me/c/1724666497/5083 — приватный канал
+  const privateMatch = url.match(/t\.me\/c\/(\d+)\/(\d+)/);
+  if (privateMatch) return { type: "private_post", channelId: BigInt(`-100${privateMatch[1]}`), messageId: +privateMatch[2] };
+
+  // https://t.me/username/s/300 — конкретная сторис
+  const storyMatch = url.match(/t\.me\/([A-Za-z0-9_]+)\/s\/(\d+)/);
+  if (storyMatch) return { type: "story", username: storyMatch[1], id: +storyMatch[2] };
+
+  // https://t.me/username/300 — пост в канале
+  const postMatch = url.match(/t\.me\/([A-Za-z0-9_]+)\/(\d+)/);
+  if (postMatch) return { type: "post", username: postMatch[1], id: +postMatch[2] };
+
+  // https://t.me/username — все сторис
+  const usernameMatch = url.match(/t\.me\/([A-Za-z0-9_]+)\/?$/);
+  if (usernameMatch) return { type: "stories_all", username: usernameMatch[1] };
+
+  return null;
+};
+
+export const isTelegramLink = (url: string): boolean => {
+  return /https?:\/\/t\.me\/[A-Za-z0-9_]/.test(url);
 };
 
 export const isThreadsLink = (url: string): boolean => {
@@ -316,7 +342,7 @@ export const sendErrorToAdmin = async (
       return;
     }
 
-    if (error instanceof FileTooLargeError) {
+    if (error instanceof FileTooLargeError || error instanceof MediaFetchError) {
       return;
     }
   }
@@ -382,139 +408,48 @@ export const sendErrorToAdmin = async (
   }
 };
 
-export const processSingleVideo = async (
+export const processSingleMedia = async (
   bot: TelegramBot,
   chatId: number,
-  video: { url?: string },
+  item: { url?: string },
+  type: "video" | "photo",
   username?: string,
-  loadingMsg?: TelegramBot.Message
 ): Promise<boolean> => {
-  if (!video.url) {
-    const result = await safeSendMessage(
-      bot,
-      chatId,
-      "Не удалось получить URL видео."
-    );
-    if (result === null) {
-      return false;
-    }
-    await sendErrorToAdmin(
-      bot,
-      "No video URL",
-      "single video",
-      undefined,
-      chatId,
-      username
-    );
+  if (!item.url) {
+    const sent = await safeSendMessage(bot, chatId, `Не удалось получить URL ${type === "video" ? "видео" : "фото"}.`);
+    if (sent !== null) await sendErrorToAdmin(bot, `No ${type} URL`, `single ${type}`, undefined, chatId, username);
     return false;
   }
 
   try {
-    const videoBuffer = await downloadBuffer(video.url);
-    await safeSendVideo(bot, chatId, videoBuffer, {
-      caption: BOT_TAG,
-      disable_notification: true
-    });
-
+    const buffer = await downloadBuffer(item.url);
+    if (type === "video") {
+      await safeSendVideo(bot, chatId, buffer, { caption: BOT_TAG, disable_notification: true });
+    } else {
+      await safeSendPhoto(bot, chatId, buffer, { caption: BOT_TAG, disable_notification: true });
+    }
     return true;
-  }
-  catch (error: any) {
+  } catch (error: any) {
     if (error instanceof FileTooLargeError) {
-      await safeSendMessage(
-        bot,
-        chatId,
-        "Слишком большой файл для загрузки. Максимальный размер: 50MB."
-      );
+      await safeSendMessage(bot, chatId, "Слишком большой файл для загрузки. Максимальный размер: 50MB.");
       return true;
     }
-
-    const errorMessage = error.message || String(error);
-    if (
-      errorMessage.includes("bot was blocked by the user") ||
-      errorMessage.includes("user is deactivated") ||
-      errorMessage.includes("chat not found") ||
-      errorMessage.includes("ETELEGRAM: 403 Forbidden")
-    ) {
+    if (error instanceof MediaFetchError) {
+      await safeSendMessage(bot, chatId, `Не удалось загрузить файл: ${error.message}`);
       return false;
     }
-    await sendErrorToAdmin(
-      bot,
-      error,
-      "single video",
-      undefined,
-      chatId,
-      username
-    );
+    if (isBotBlockedError(error)) return false;
+    await sendErrorToAdmin(bot, error, `single ${type}`, undefined, chatId, username);
     return false;
   }
 };
 
-export const processSinglePhoto = async (
-  bot: TelegramBot,
-  chatId: number,
-  photo: { url?: string },
-  username?: string,
-  loadingMsg?: TelegramBot.Message
-): Promise<boolean> => {
-  if (!photo.url) {
-    const result = await safeSendMessage(
-      bot,
-      chatId,
-      "Не удалось получить URL фото."
-    );
-    if (result === null) {
-      return false;
-    }
-    await sendErrorToAdmin(
-      bot,
-      "No photo URL",
-      "single photo",
-      undefined,
-      chatId,
-      username
-    );
-    return false;
-  }
+// ponytail: kept for backwards compat, delegate to processSingleMedia
+export const processSingleVideo = (bot: TelegramBot, chatId: number, video: { url?: string }, username?: string) =>
+  processSingleMedia(bot, chatId, video, "video", username);
 
-  try {
-    const photoBuffer = await downloadBuffer(photo.url);
-    await safeSendPhoto(bot, chatId, photoBuffer, {
-      caption: BOT_TAG,
-      disable_notification: true
-    });
-
-    return true;
-  }
-  catch (error: any) {
-    if (error instanceof FileTooLargeError) {
-      await safeSendMessage(
-        bot,
-        chatId,
-        "Слишком большой файл для загрузки. Максимальный размер: 50MB."
-      );
-      return true;
-    }
-
-    const errorMessage = error.message || String(error);
-    if (
-      errorMessage.includes("bot was blocked by the user") ||
-      errorMessage.includes("user is deactivated") ||
-      errorMessage.includes("chat not found") ||
-      errorMessage.includes("ETELEGRAM: 403 Forbidden")
-    ) {
-      return false;
-    }
-    await sendErrorToAdmin(
-      bot,
-      error,
-      "single photo",
-      undefined,
-      chatId,
-      username
-    );
-    return false;
-  }
-};
+export const processSinglePhoto = (bot: TelegramBot, chatId: number, photo: { url?: string }, username?: string) =>
+  processSingleMedia(bot, chatId, photo, "photo", username);
 
 export const processMediaGroup = async (
   bot: TelegramBot,
@@ -539,24 +474,19 @@ export const processMediaGroup = async (
   for (let groupIndex = 0; groupIndex < mediaGroups.length; groupIndex++) {
     const group = mediaGroups[groupIndex];
 
+    let mediaBuffers: { buffer: Buffer, index: number }[] = [];
     try {
-      // 🚀 ПАРАЛЛЕЛЬНАЯ ЗАГРУЗКА - главное улучшение!
-      const downloadPromises = group.map(async (item, index) => {
+      const downloadResults = await Promise.all(group.map(async (item, index) => {
         try {
           const buffer = await downloadBuffer(item.url);
           return { buffer, index, success: true };
-        }
-        catch (error) {
+        } catch (error) {
           console.error(`Failed to download item ${index}:`, error);
           return { buffer: null, index, success: false, error };
         }
-      });
+      }));
 
-      // Ожидаем все загрузки одновременно
-      const downloadResults = await Promise.all(downloadPromises);
-
-      // Фильтруем только успешные загрузки
-      const mediaBuffers = downloadResults.filter(
+      mediaBuffers = downloadResults.filter(
         (result) => result.success && result.buffer
       ) as { buffer: Buffer, index: number }[];
 
@@ -616,63 +546,35 @@ export const processMediaGroup = async (
     }
     catch (error: any) {
       if (error instanceof FileTooLargeError) {
-        await safeSendMessage(
-          bot,
-          chatId,
-          "Один или несколько файлов слишком большие для загрузки. Максимальный размер: 50MB."
-        );
+        await safeSendMessage(bot, chatId, "Один или несколько файлов слишком большие для загрузки. Максимальный размер: 50MB.");
         return true;
+      }
+
+      if (error instanceof MediaFetchError) {
+        await safeSendMessage(bot, chatId, `Не удалось загрузить файл: ${error.message}`);
+        return false;
       }
 
       const errorMessage = error.message || String(error);
 
       if (errorMessage.includes("413 Request Entity Too Large")) {
-        console.log(
-          `Media group too large for ${mediaType}, falling back to individual files`
-        );
-
-        // Fallback с параллельной загрузкой
-        const fallbackPromises = group.map(async (item, i) => {
+        for (let i = 0; i < mediaBuffers.length; i++) {
+          const { buffer } = mediaBuffers[i];
           try {
-            const buffer = await downloadBuffer(item.url);
-
             if (mediaType === "video") {
-              await safeSendVideo(bot, chatId, buffer, {
-                caption: i === 0 ? BOT_TAG : undefined,
-                disable_notification: true
-              });
+              await safeSendVideo(bot, chatId, buffer, { caption: i === 0 ? BOT_TAG : undefined, disable_notification: true });
+            } else {
+              await safeSendPhoto(bot, chatId, buffer, { caption: i === 0 ? BOT_TAG : undefined, disable_notification: true });
             }
-            else {
-              await safeSendPhoto(bot, chatId, buffer, {
-                caption: i === 0 ? BOT_TAG : undefined,
-                disable_notification: true
-              });
-            }
-
-            if (i < group.length - 1) {
-              await new Promise((resolve) => setTimeout(resolve, 200));
-            }
+            if (i < mediaBuffers.length - 1) await new Promise(r => setTimeout(r, 200));
+          } catch (e: any) {
+            console.error(`Failed to send individual ${mediaType} ${i}:`, e);
           }
-          catch (individualError: any) {
-            console.error(
-              `Failed to send individual ${mediaType} ${i}:`,
-              individualError
-            );
-          }
-        });
-
-        await Promise.all(fallbackPromises);
+        }
         continue;
       }
 
-      if (
-        errorMessage.includes("bot was blocked by the user") ||
-        errorMessage.includes("user is deactivated") ||
-        errorMessage.includes("chat not found") ||
-        errorMessage.includes("ETELEGRAM: 403 Forbidden")
-      ) {
-        return false;
-      }
+      if (isBotBlockedError(error)) return false;
 
       await sendErrorToAdmin(
         bot,
@@ -690,7 +592,7 @@ export const processMediaGroup = async (
 };
 
 const getThreadsDownloadLinks = async (url: string): Promise<ThreadsApiResponse> => {
-  const response = await fetch(`https://api.threadsphotodownloader.com/v2/media?url=${url}`);
+  const response = await fetchWithTimeout(`https://api.threadsphotodownloader.com/v2/media?url=${encodeURIComponent(url)}`, 15_000);
 
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
@@ -764,19 +666,19 @@ export const processThreads = async (
     }
 
     if (photos.length === 1) {
-      hasSuccessfulDownload = await processSinglePhoto(bot, chatId, { url: photos[0] }, username, loadingMsg) || hasSuccessfulDownload;
+      hasSuccessfulDownload = await processSinglePhoto(bot, chatId, { url: photos[0] }, username) || hasSuccessfulDownload;
     }
     else if (photos.length > 1) {
       const photoItems = photos.map((url) => ({ type: "image", url }));
-      hasSuccessfulDownload = await processMediaGroup(bot, chatId, photoItems, "photo", username, loadingMsg) || hasSuccessfulDownload;
+      hasSuccessfulDownload = await processMediaGroup(bot, chatId, photoItems, "photo", username) || hasSuccessfulDownload;
     }
 
     if (videos.length === 1) {
-      hasSuccessfulDownload = await processSingleVideo(bot, chatId, { url: videos[0] }, username, loadingMsg) || hasSuccessfulDownload;
+      hasSuccessfulDownload = await processSingleVideo(bot, chatId, { url: videos[0] }, username) || hasSuccessfulDownload;
     }
     else if (videos.length > 1) {
       const videoItems = videos.map((url) => ({ type: "video", url }));
-      hasSuccessfulDownload = await processMediaGroup(bot, chatId, videoItems, "video", username, loadingMsg) || hasSuccessfulDownload;
+      hasSuccessfulDownload = await processMediaGroup(bot, chatId, videoItems, "video", username) || hasSuccessfulDownload;
     }
 
     if (loadingMsg) {
@@ -975,10 +877,10 @@ const convertTweetToImage = async (
       throw new Error("Could not extract tweet ID from URL");
     }
 
-    const response = await fetch(
-      `https://twtoimage.vercel.app/api/tweet-to-image/${tweetId}`
+    const response = await fetchWithTimeout(
+      `https://twtoimage.vercel.app/api/tweet-to-image/${tweetId}`,
+      15_000
     );
-    console.log("response", response);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -1162,49 +1064,19 @@ export const processSocialMedia = async (
     let videoProcessed = false;
 
     try {
-      // Сначала обрабатываем фото
       if (photos.length === 1) {
-        photoProcessed = await processSinglePhoto(
-          bot,
-          chatId,
-          photos[0],
-          username,
-          loadingMsg
-        );
+        photoProcessed = await processSinglePhoto(bot, chatId, photos[0], username);
         hasSuccessfulDownload = hasSuccessfulDownload || photoProcessed;
-      }
-      else if (photos.length > 1) {
-        photoProcessed = await processMediaGroup(
-          bot,
-          chatId,
-          photos,
-          "photo",
-          username,
-          loadingMsg
-        );
+      } else if (photos.length > 1) {
+        photoProcessed = await processMediaGroup(bot, chatId, photos, "photo", username);
         hasSuccessfulDownload = hasSuccessfulDownload || photoProcessed;
       }
 
-      // Затем обрабатываем видео
       if (videos.length === 1) {
-        videoProcessed = await processSingleVideo(
-          bot,
-          chatId,
-          videos[0],
-          username,
-          loadingMsg
-        );
+        videoProcessed = await processSingleVideo(bot, chatId, videos[0], username);
         hasSuccessfulDownload = hasSuccessfulDownload || videoProcessed;
-      }
-      else if (videos.length > 1) {
-        videoProcessed = await processMediaGroup(
-          bot,
-          chatId,
-          videos,
-          "video",
-          username,
-          loadingMsg
-        );
+      } else if (videos.length > 1) {
+        videoProcessed = await processMediaGroup(bot, chatId, videos, "video", username);
         hasSuccessfulDownload = hasSuccessfulDownload || videoProcessed;
       }
 
@@ -1340,7 +1212,7 @@ export const helpMessage = [
   "",
   "Поддерживаемые платформы:",
   "",
-  "• Telegram Stories (@username)",
+  "• Telegram (@username, t.me/user/s/300 — сторис, t.me/channel/300 — пост)",
   "• Instagram (рилсы, посты, сторис)",
   "• Threads (картинки и видео)",
   "• Twitter (X) (посты, картинки и видео)",
