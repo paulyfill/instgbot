@@ -24,12 +24,12 @@ jobs:
           
           cd ${{ secrets.VPS_PROJECT_PATH }}
           
-          # Pull latest changes (ignore sqlite WAL temp files and lockfile)
-          git checkout -- bot_data.sqlite-shm bot_data.sqlite-wal bun.lock 2>/dev/null || true
+          # Pull latest changes (ignore sqlite WAL temp files)
+          git checkout -- bot_data.sqlite-shm bot_data.sqlite-wal 2>/dev/null || true
           git pull origin main
-          
+
           # Install dependencies
-          ~/.bun/bin/bun install
+          ~/.bun/bin/bun install --frozen-lockfile
           
           # Reload with zero downtime
           ~/.bun/bin/pm2 reload ecosystem.config.cjs --update-env || ~/.bun/bin/pm2 start ecosystem.config.cjs
