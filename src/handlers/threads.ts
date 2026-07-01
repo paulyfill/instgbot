@@ -1,6 +1,6 @@
 import TelegramBot from "node-telegram-bot-api";
 import { BOT_TAG } from "../config";
-import { safeDeleteMessage, safeSendMessage } from "../bot/safe-send";
+import { safeSendMessage } from "../bot/safe-send";
 import { sendErrorToAdmin } from "../bot/errors";
 import { processMediaGroup, processSinglePhoto, processSingleVideo } from "../media/download";
 import { detectPlatform } from "../media/platform";
@@ -50,7 +50,6 @@ export const processThreads = async (
 ) => {
   const platform = detectPlatform(message);
 
-  let loadingMsg: TelegramBot.Message | null = null;
   let hasSuccessfulDownload = false;
   try {
     const response = await getThreadsDownloadLinks(message);
@@ -63,22 +62,6 @@ export const processThreads = async (
         chatId,
         "Не удалось получить медиафайлы из Threads."
       );
-      recordDownload(
-        chatId,
-        message,
-        platform,
-        "unknown",
-        false,
-        username,
-        firstName
-      );
-      return;
-    }
-
-    loadingMsg = await safeSendMessage(bot, chatId, "Загружаю...", {
-      disable_notification: true
-    });
-    if (loadingMsg === null) {
       recordDownload(
         chatId,
         message,
@@ -107,10 +90,6 @@ export const processThreads = async (
       hasSuccessfulDownload = await processMediaGroup(bot, chatId, videoItems, "video", username) || hasSuccessfulDownload;
     }
 
-    if (loadingMsg) {
-      await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
-    }
-
     recordDownload(
       chatId,
       message,
@@ -122,9 +101,6 @@ export const processThreads = async (
     );
   }
   catch (error) {
-    if (loadingMsg) {
-      await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
-    }
     await safeSendMessage(
       bot,
       chatId,

@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import { snapsave } from "snapsave-media-downloader";
 import { ADMIN_USERNAME, BOT_TAG } from "../config";
-import { safeDeleteMessage, safeSendMessage, safeSendPhoto } from "../bot/safe-send";
+import { safeSendMessage, safeSendPhoto } from "../bot/safe-send";
 import { FileTooLargeError, sendErrorToAdmin } from "../bot/errors";
 import { fetchWithTimeout, processMediaGroup, processSinglePhoto, processSingleVideo } from "../media/download";
 import { detectPlatform } from "../media/platform";
@@ -59,14 +59,6 @@ export const processSocialMedia = async (
     if (!download.success) {
       // Если это Twitter/X и snapsave не сработал, пробуем конвертировать в изображение
       if (platform === "twitter" || platform === "x") {
-        const loadingMsg = await safeSendMessage(bot, chatId, "Загружаю...", {
-          disable_notification: true
-        });
-
-        if (loadingMsg === null) {
-          return;
-        }
-
         try {
           const imageBuffer = await convertTweetToImage(message);
 
@@ -76,7 +68,6 @@ export const processSocialMedia = async (
               disable_notification: true
             });
 
-            await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
             recordDownload(
               chatId,
               message,
@@ -89,7 +80,6 @@ export const processSocialMedia = async (
             return;
           }
           else {
-            await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
             await safeSendMessage(
               bot,
               chatId,
@@ -116,7 +106,6 @@ export const processSocialMedia = async (
           }
         }
         catch (error: any) {
-          await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
           await safeSendMessage(
             bot,
             chatId,
@@ -197,14 +186,6 @@ export const processSocialMedia = async (
 
     const videos = media.filter((m) => m.type === "video");
     const photos = media.filter((m) => m.type === "image");
-    const loadingMsg = await safeSendMessage(bot, chatId, "Загружаю...", {
-      disable_notification: true
-    });
-
-    if (loadingMsg === null) {
-      return;
-    }
-
     let hasSuccessfulDownload = false;
     let photoProcessed = false;
     let videoProcessed = false;
@@ -226,11 +207,6 @@ export const processSocialMedia = async (
       else if (videos.length > 1) {
         videoProcessed = await processMediaGroup(bot, chatId, videos, "video", username);
         hasSuccessfulDownload = hasSuccessfulDownload || videoProcessed;
-      }
-
-      // Удаляем сообщение "Загружаю..." после обработки всех медиа
-      if (loadingMsg) {
-        await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
       }
 
       if (hasSuccessfulDownload) {
@@ -258,9 +234,6 @@ export const processSocialMedia = async (
     }
     catch (error: any) {
       if (error instanceof FileTooLargeError) {
-        if (loadingMsg) {
-          await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
-        }
         await safeSendMessage(
           bot,
           chatId,
@@ -278,9 +251,6 @@ export const processSocialMedia = async (
         return;
       }
 
-      if (loadingMsg) {
-        await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
-      }
       recordDownload(
         chatId,
         message,

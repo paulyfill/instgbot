@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import { youtube } from "btch-downloader";
 import { BOT_TAG } from "../config";
-import { safeDeleteMessage, safeSendMessage, safeSendVideo, withChatAction } from "../bot/safe-send";
+import { safeSendMessage, safeSendVideo, withChatAction } from "../bot/safe-send";
 import { FileTooLargeError, sendErrorToAdmin } from "../bot/errors";
 import { Readable } from "node:stream";
 import { fetchMediaResponse } from "../media/download";
@@ -21,14 +21,6 @@ export const processYouTubeShorts = async (
     const response = await youtube(message);
 
     if (response && response.mp4) {
-      const loadingMsg = await safeSendMessage(bot, chatId, "Загружаю...", {
-        disable_notification: true
-      });
-
-      if (loadingMsg === null) {
-        return;
-      }
-
       try {
         const mediaResponse = await fetchMediaResponse(response.mp4);
         const stream = Readable.fromWeb(mediaResponse.body as any);
@@ -38,8 +30,6 @@ export const processYouTubeShorts = async (
           disable_notification: true,
           supports_streaming: true,
         } as any));
-
-        await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
 
         recordDownload(
           chatId,
@@ -53,7 +43,6 @@ export const processYouTubeShorts = async (
       }
       catch (sendError: any) {
         if (sendError instanceof FileTooLargeError) {
-          await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
           await safeSendMessage(
             bot,
             chatId,
@@ -71,7 +60,6 @@ export const processYouTubeShorts = async (
           return;
         }
 
-        await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
         await safeSendMessage(
           bot,
           chatId,
