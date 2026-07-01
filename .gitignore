@@ -2,5 +2,7 @@ dist
 node_modules
 .env
 bot_data.sqlite
+bot_data.sqlite-shm
+bot_data.sqlite-wal
 .DS_Store
 logs/
