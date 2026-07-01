@@ -14,7 +14,7 @@ export const fetchWithTimeout = (url: string, timeoutMs = 30_000, options?: Requ
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 };
 
-export const fetchMediaResponse = async (url: string): Promise<Response> => {
+export const fetchMediaResponse = async (url: string, skipSizeCheck = false): Promise<Response> => {
   let response: Response;
   try {
     response = await fetchWithTimeout(url);
@@ -30,8 +30,10 @@ export const fetchMediaResponse = async (url: string): Promise<Response> => {
     throw e;
   }
   if (!response.ok) throw new MediaFetchError(`Сервер вернул ошибку ${response.status}.`);
-  const contentLength = response.headers.get("content-length");
-  if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) throw new FileTooLargeError(parseInt(contentLength));
+  if (!skipSizeCheck) {
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) throw new FileTooLargeError(parseInt(contentLength));
+  }
   return response;
 };
 
@@ -146,7 +148,7 @@ export const processMediaGroup = async (
         return {
           type: mediaType as "video" | "photo",
           media: getCachedFileId(postUrl, mediaType, globalIndex)!,
-          caption: groupIndex === 0 && localIndex === 0 ? BOT_TAG : undefined,
+          caption: groupIndex === 0 && localIndex === 0 ? BOT_TAG : undefined
         };
       });
 
@@ -216,7 +218,7 @@ export const processMediaGroup = async (
           type: mediaType as "video" | "photo",
           media: new InputFile(Readable.fromWeb(response.body as any), `media_${localIndex}.${ext}`),
           caption: groupIndex === 0 && localIndex === 0 ? BOT_TAG : undefined,
-          ...(mediaType === "video" && { supports_streaming: true }),
+          ...(mediaType === "video" && { supports_streaming: true })
         }));
         const messages = await withChatAction(bot, chatId, action, () =>
           grammyApi.sendMediaGroup(chatId, grammyMedia as any, { disable_notification: true })
@@ -224,9 +226,7 @@ export const processMediaGroup = async (
         if (postUrl && messages) {
           messages.forEach((msg: any, i: number) => {
             const globalIndex = groupIndex * groupSize + valid[i].localIndex;
-            const fileId = mediaType === "video"
-              ? msg.video?.file_id
-              : msg.photo?.[msg.photo?.length - 1]?.file_id;
+            const fileId = mediaType === "video"? msg.video?.file_id: msg.photo?.[msg.photo?.length - 1]?.file_id;
             if (fileId) setCachedFileId(postUrl, mediaType, globalIndex, fileId);
           });
         }

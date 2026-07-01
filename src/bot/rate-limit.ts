@@ -69,6 +69,18 @@ export const checkTelegramStoriesRateLimit = (userId: number): { allowed: boolea
   return { allowed: true, resetTime: now + TG_STORIES_LIMIT_WINDOW };
 };
 
+const ytRateLimits = new Map<number, number>();
+const YT_LIMIT_WINDOW = 3 * 60 * 1000;
+
+export const checkYouTubeRateLimit = (userId: number): { allowed: boolean, resetTime: number } => {
+  if (isAdmin(userId)) return { allowed: true, resetTime: 0 };
+  const now = Date.now();
+  const last = ytRateLimits.get(userId) ?? 0;
+  if (now - last < YT_LIMIT_WINDOW) return { allowed: false, resetTime: last + YT_LIMIT_WINDOW };
+  ytRateLimits.set(userId, now);
+  return { allowed: true, resetTime: 0 };
+};
+
 export const cleanupRateLimitData = () => {
   const now = Date.now();
   for (const [userId, userLimit] of userRateLimits.entries()) {

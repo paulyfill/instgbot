@@ -15,7 +15,7 @@ export const helpMessage = [
   "• Twitter (X) (посты, картинки и видео)",
   "• Facebook (видео)",
   "• TikTok",
-  "• YouTube Shorts",
+  "• YouTube (Shorts, клипы, полные видео)",
   "",
   "Пример: https://www.instagram.com/reel/DKKPO_gyGAg/?igsh=ejVqOTBpNm85OHA0",
   "",
