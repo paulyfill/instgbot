@@ -55,6 +55,7 @@ export const processThreads = async (
     const response = await getThreadsDownloadLinks(message);
     const photos: string[] = response.image_urls || [];
     const videos: string[] = (response.video_urls || []).map(v => v.download_url);
+    const postUrl = message.split("?")[0].replace(/\/$/, "");
 
     if (photos.length === 0 && videos.length === 0) {
       await safeSendMessage(
@@ -75,19 +76,19 @@ export const processThreads = async (
     }
 
     if (photos.length === 1) {
-      hasSuccessfulDownload = await processSinglePhoto(bot, chatId, { url: photos[0] }, username) || hasSuccessfulDownload;
+      hasSuccessfulDownload = await processSinglePhoto(bot, chatId, { url: photos[0] }, username, postUrl) || hasSuccessfulDownload;
     }
     else if (photos.length > 1) {
       const photoItems = photos.map((url) => ({ type: "image", url }));
-      hasSuccessfulDownload = await processMediaGroup(bot, chatId, photoItems, "photo", username) || hasSuccessfulDownload;
+      hasSuccessfulDownload = await processMediaGroup(bot, chatId, photoItems, "photo", username, postUrl) || hasSuccessfulDownload;
     }
 
     if (videos.length === 1) {
-      hasSuccessfulDownload = await processSingleVideo(bot, chatId, { url: videos[0] }, username) || hasSuccessfulDownload;
+      hasSuccessfulDownload = await processSingleVideo(bot, chatId, { url: videos[0] }, username, postUrl) || hasSuccessfulDownload;
     }
     else if (videos.length > 1) {
       const videoItems = videos.map((url) => ({ type: "video", url }));
-      hasSuccessfulDownload = await processMediaGroup(bot, chatId, videoItems, "video", username) || hasSuccessfulDownload;
+      hasSuccessfulDownload = await processMediaGroup(bot, chatId, videoItems, "video", username, postUrl) || hasSuccessfulDownload;
     }
 
     recordDownload(

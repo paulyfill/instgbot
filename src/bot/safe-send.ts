@@ -1,8 +1,6 @@
 import TelegramBot from "node-telegram-bot-api";
-import { Bot as GrammyBot, InputFile } from "grammy";
-import type { Readable } from "node:stream";
+import { Bot as GrammyBot } from "grammy";
 
-// ponytail: grammy api used only for streaming uploads, polling stays on node-telegram-bot-api
 export const grammyApi = new GrammyBot(Bun.env.TELEGRAM_BOT!).api;
 
 export const isBotBlockedError = (error: any): boolean => {
@@ -33,15 +31,11 @@ export const safeSendMessage = async (
 export const safeSendVideo = async (
   bot: TelegramBot,
   chatId: number,
-  video: string | Buffer | Readable,
+  video: string | Buffer,
   options?: TelegramBot.SendVideoOptions
 ): Promise<TelegramBot.Message | null> => {
   try {
-    if (video instanceof Buffer || typeof video === "string") {
-      return await bot.sendVideo(chatId, video, options);
-    }
-    await grammyApi.sendVideo(chatId, new InputFile(video, "video.mp4"), options as any);
-    return null;
+    return await bot.sendVideo(chatId, video, options);
   }
   catch (error: any) {
     if (isBotBlockedError(error)) return null;
@@ -52,15 +46,11 @@ export const safeSendVideo = async (
 export const safeSendPhoto = async (
   bot: TelegramBot,
   chatId: number,
-  photo: string | Buffer | Readable,
+  photo: string | Buffer,
   options?: TelegramBot.SendPhotoOptions
 ): Promise<TelegramBot.Message | null> => {
   try {
-    if (photo instanceof Buffer || typeof photo === "string") {
-      return await bot.sendPhoto(chatId, photo, options);
-    }
-    await grammyApi.sendPhoto(chatId, new InputFile(photo, "photo.jpg"), options as any);
-    return null;
+    return await bot.sendPhoto(chatId, photo, options);
   }
   catch (error: any) {
     if (isBotBlockedError(error)) return null;

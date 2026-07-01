@@ -186,26 +186,27 @@ export const processSocialMedia = async (
 
     const videos = media.filter((m) => m.type === "video");
     const photos = media.filter((m) => m.type === "image");
+    const postUrl = message.split("?")[0].replace(/\/$/, "");
     let hasSuccessfulDownload = false;
     let photoProcessed = false;
     let videoProcessed = false;
 
     try {
       if (photos.length === 1) {
-        photoProcessed = await processSinglePhoto(bot, chatId, photos[0], username);
+        photoProcessed = await processSinglePhoto(bot, chatId, photos[0], username, postUrl);
         hasSuccessfulDownload = hasSuccessfulDownload || photoProcessed;
       }
       else if (photos.length > 1) {
-        photoProcessed = await processMediaGroup(bot, chatId, photos, "photo", username);
+        photoProcessed = await processMediaGroup(bot, chatId, photos, "photo", username, postUrl);
         hasSuccessfulDownload = hasSuccessfulDownload || photoProcessed;
       }
 
       if (videos.length === 1) {
-        videoProcessed = await processSingleVideo(bot, chatId, videos[0], username);
+        videoProcessed = await processSingleVideo(bot, chatId, videos[0], username, postUrl);
         hasSuccessfulDownload = hasSuccessfulDownload || videoProcessed;
       }
       else if (videos.length > 1) {
-        videoProcessed = await processMediaGroup(bot, chatId, videos, "video", username);
+        videoProcessed = await processMediaGroup(bot, chatId, videos, "video", username, postUrl);
         hasSuccessfulDownload = hasSuccessfulDownload || videoProcessed;
       }
 

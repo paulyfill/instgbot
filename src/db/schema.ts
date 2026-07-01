@@ -41,6 +41,16 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS media_cache (
+    post_url TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    media_index INTEGER NOT NULL,
+    file_id TEXT NOT NULL,
+    PRIMARY KEY (post_url, media_type, media_index)
+  )
+`);
+
 db.exec("CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users (chat_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_downloads_user_id ON downloads (user_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_errors_user_id ON errors (user_id)");

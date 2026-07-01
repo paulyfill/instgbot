@@ -174,3 +174,14 @@ export const getNewsletterStats = (): { total: number, subscribed: number, unsub
 
   return result || { total: 0, subscribed: 0, unsubscribed: 0 };
 };
+
+export const getCachedFileId = (postUrl: string, mediaType: string, index = 0): string | null => {
+  const row = db.query("SELECT file_id FROM media_cache WHERE post_url = ? AND media_type = ? AND media_index = ?")
+    .get(postUrl, mediaType, index) as { file_id: string } | undefined;
+  return row?.file_id ?? null;
+};
+
+export const setCachedFileId = (postUrl: string, mediaType: string, index: number, fileId: string): void => {
+  db.query("INSERT OR REPLACE INTO media_cache (post_url, media_type, media_index, file_id) VALUES (?, ?, ?, ?)")
+    .run(postUrl, mediaType, index, fileId);
+};
