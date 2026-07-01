@@ -38,9 +38,10 @@
     "vitest": "^2.1.6"
   },
   "dependencies": {
-    "@types/bun": "^1.2.11",
+    "@types/bun": "^1.3.14",
     "@types/node-telegram-bot-api": "^0.64.8",
     "btch-downloader": "^4.0.9",
+    "grammy": "^1.44.0",
     "input": "^1.0.1",
     "node-telegram-bot-api": "^0.66.0",
     "snapsave-media-downloader": "^2.4.0",

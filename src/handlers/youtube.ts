@@ -1,9 +1,10 @@
 import TelegramBot from "node-telegram-bot-api";
 import { youtube } from "btch-downloader";
 import { BOT_TAG } from "../config";
-import { safeDeleteMessage, safeSendMessage, safeSendVideo } from "../bot/safe-send";
+import { safeDeleteMessage, safeSendMessage, safeSendVideo, withChatAction } from "../bot/safe-send";
 import { FileTooLargeError, sendErrorToAdmin } from "../bot/errors";
-import { downloadBuffer } from "../media/download";
+import { Readable } from "node:stream";
+import { fetchMediaResponse } from "../media/download";
 import { detectPlatform } from "../media/platform";
 import { recordDownload } from "../db/queries";
 
@@ -29,12 +30,14 @@ export const processYouTubeShorts = async (
       }
 
       try {
-        const videoBuffer = await downloadBuffer(response.mp4);
+        const mediaResponse = await fetchMediaResponse(response.mp4);
+        const stream = Readable.fromWeb(mediaResponse.body as any);
 
-        await safeSendVideo(bot, chatId, videoBuffer, {
+        await withChatAction(bot, chatId, "upload_video", () => safeSendVideo(bot, chatId, stream, {
           caption: BOT_TAG,
-          disable_notification: true
-        });
+          disable_notification: true,
+          supports_streaming: true,
+        } as any));
 
         await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
 

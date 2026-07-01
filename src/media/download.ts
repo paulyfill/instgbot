@@ -1,6 +1,8 @@
 import TelegramBot from "node-telegram-bot-api";
+import { Readable } from "node:stream";
+import { InputFile } from "grammy";
 import { BOT_TAG } from "../config";
-import { isBotBlockedError, safeSendMediaGroup, safeSendMessage, safeSendPhoto, safeSendVideo } from "../bot/safe-send";
+import { grammyApi, isBotBlockedError, safeSendMessage, safeSendPhoto, safeSendVideo, withChatAction } from "../bot/safe-send";
 import { FileTooLargeError, MediaFetchError, sendErrorToAdmin } from "../bot/errors";
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -11,7 +13,7 @@ export const fetchWithTimeout = (url: string, timeoutMs = 30_000, options?: Requ
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 };
 
-export const downloadBuffer = async (url: string): Promise<Buffer> => {
+export const fetchMediaResponse = async (url: string): Promise<Response> => {
   let response: Response;
   try {
     response = await fetchWithTimeout(url);
@@ -26,21 +28,16 @@ export const downloadBuffer = async (url: string): Promise<Buffer> => {
     }
     throw e;
   }
-
-  if (!response.ok) {
-    throw new MediaFetchError(`Сервер вернул ошибку ${response.status}.`);
-  }
-
+  if (!response.ok) throw new MediaFetchError(`Сервер вернул ошибку ${response.status}.`);
   const contentLength = response.headers.get("content-length");
-  if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
-    throw new FileTooLargeError(parseInt(contentLength));
-  }
+  if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) throw new FileTooLargeError(parseInt(contentLength));
+  return response;
+};
 
+export const downloadBuffer = async (url: string): Promise<Buffer> => {
+  const response = await fetchMediaResponse(url);
   const arrayBuffer = await response.arrayBuffer();
-  if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
-    throw new FileTooLargeError(arrayBuffer.byteLength);
-  }
-
+  if (arrayBuffer.byteLength > MAX_FILE_SIZE) throw new FileTooLargeError(arrayBuffer.byteLength);
   return Buffer.from(arrayBuffer);
 };
 
@@ -57,29 +54,37 @@ export const processSingleMedia = async (
     return false;
   }
 
-  try {
-    const buffer = await downloadBuffer(item.url);
-    if (type === "video") {
-      await safeSendVideo(bot, chatId, buffer, { caption: BOT_TAG, disable_notification: true });
-    }
-    else {
-      await safeSendPhoto(bot, chatId, buffer, { caption: BOT_TAG, disable_notification: true });
-    }
-    return true;
-  }
-  catch (error: any) {
-    if (error instanceof FileTooLargeError) {
-      await safeSendMessage(bot, chatId, "Слишком большой файл для загрузки. Максимальный размер: 50MB.");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetchMediaResponse(item.url);
+      const stream = Readable.fromWeb(response.body as any);
+      const sendOpts = { caption: BOT_TAG, disable_notification: true, ...(type === "video" && { supports_streaming: true }) } as any;
+      const action = type === "video" ? "upload_video" : "upload_photo";
+      await withChatAction(bot, chatId, action, () =>
+        type === "video" ? safeSendVideo(bot, chatId, stream, sendOpts) : safeSendPhoto(bot, chatId, stream, sendOpts)
+      );
       return true;
     }
-    if (error instanceof MediaFetchError) {
-      await safeSendMessage(bot, chatId, `Не удалось загрузить файл: ${error.message}`);
+    catch (error: any) {
+      if (error instanceof FileTooLargeError) {
+        await safeSendMessage(bot, chatId, "Слишком большой файл для загрузки. Максимальный размер: 50MB.");
+        return true;
+      }
+      if (error instanceof MediaFetchError) {
+        await safeSendMessage(bot, chatId, `Не удалось загрузить файл: ${error.message}`);
+        return false;
+      }
+      if (isBotBlockedError(error)) return false;
+      const isTransient = /EFATAL|EPARSE/.test(String(error?.message || error));
+      if (attempt === 0 && isTransient) {
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
+      await sendErrorToAdmin(bot, error, `single ${type}`, undefined, chatId, username);
       return false;
     }
-    if (isBotBlockedError(error)) return false;
-    await sendErrorToAdmin(bot, error, `single ${type}`, undefined, chatId, username);
-    return false;
   }
+  return false;
 };
 
 // ponytail: kept for backwards compat, delegate to processSingleMedia
@@ -109,78 +114,56 @@ export const processMediaGroup = async (
     mediaGroups.push(validMedia.slice(i, i + groupSize));
   }
 
+  const ext = mediaType === "video" ? "mp4" : "jpg";
+  const maxGroupSize = 40 * 1024 * 1024;
+
   for (let groupIndex = 0; groupIndex < mediaGroups.length; groupIndex++) {
     const group = mediaGroups[groupIndex];
-
-    let mediaBuffers: { buffer: Buffer, index: number }[] = [];
     try {
-      const downloadResults = await Promise.all(group.map(async (item, index) => {
+      const fetchResults = await Promise.all(group.map(async (item, index) => {
         try {
-          const buffer = await downloadBuffer(item.url);
-          return { buffer, index, success: true };
+          const response = await fetchMediaResponse(item.url);
+          return { response, index, success: true as const };
         }
         catch (error) {
-          console.error(`Failed to download item ${index}:`, error);
-          return { buffer: null, index, success: false, error };
+          console.error(`Failed to fetch item ${index}:`, error);
+          return { response: null, index, success: false as const, error };
         }
       }));
 
-      mediaBuffers = downloadResults.filter(
-        (result) => result.success && result.buffer
-      ) as { buffer: Buffer, index: number }[];
+      const valid = fetchResults.filter(r => r.success && r.response) as { response: Response, index: number, success: true }[];
+      if (valid.length === 0) { console.log("No media fetched successfully"); continue; }
 
-      if (mediaBuffers.length === 0) {
-        console.log("No media files were downloaded successfully");
-        continue;
-      }
+      const totalSize = valid.reduce((sum, { response }) => {
+        const cl = response.headers.get("content-length");
+        return sum + (cl ? parseInt(cl) : 0);
+      }, 0);
 
-      // Проверяем общий размер
-      let totalSize = 0;
-      for (const { buffer } of mediaBuffers) {
-        totalSize += buffer.length;
-      }
-
-      const maxGroupSize = 40 * 1024 * 1024; // 40MB
+      const action = mediaType === "video" ? "upload_video" : "upload_photo";
       if (totalSize > maxGroupSize) {
-        console.log(
-          `Group size ${Math.round(
-            totalSize / 1024 / 1024
-          )}MB exceeds limit, sending individually`
-        );
-
-        for (const { buffer, index } of mediaBuffers) {
-          if (mediaType === "video") {
-            await safeSendVideo(bot, chatId, buffer, {
-              caption: index === 0 ? BOT_TAG : undefined,
-              disable_notification: true
-            });
-          }
-          else {
-            await safeSendPhoto(bot, chatId, buffer, {
-              caption: index === 0 ? BOT_TAG : undefined,
-              disable_notification: true
-            });
-          }
-
-          if (index < mediaBuffers.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 200));
-          }
+        for (const { response, index } of valid) {
+          const stream = Readable.fromWeb(response.body as any);
+          const opts = { caption: index === 0 ? BOT_TAG : undefined, disable_notification: true, ...(mediaType === "video" && { supports_streaming: true }) } as any;
+          await withChatAction(bot, chatId, action, () =>
+            mediaType === "video" ? safeSendVideo(bot, chatId, stream, opts) : safeSendPhoto(bot, chatId, stream, opts)
+          );
+          if (index < valid.length - 1) await new Promise(r => setTimeout(r, 200));
         }
       }
       else {
-        const telegramMedia = mediaBuffers.map(({ buffer, index }) => ({
-          type: mediaType,
-          media: buffer as any,
-          caption: index === 0 ? BOT_TAG : undefined
+        const grammyMedia = valid.map(({ response, index }) => ({
+          type: mediaType as "video" | "photo",
+          media: new InputFile(Readable.fromWeb(response.body as any), `media_${index}.${ext}`),
+          caption: index === 0 ? BOT_TAG : undefined,
+          ...(mediaType === "video" && { supports_streaming: true }),
         }));
-
-        await safeSendMediaGroup(bot, chatId, telegramMedia, {
-          disable_notification: true
-        });
+        await withChatAction(bot, chatId, action, () =>
+          grammyApi.sendMediaGroup(chatId, grammyMedia as any, { disable_notification: true })
+        );
       }
 
       if (groupIndex < mediaGroups.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise(r => setTimeout(r, 500));
       }
     }
     catch (error: any) {
@@ -188,43 +171,12 @@ export const processMediaGroup = async (
         await safeSendMessage(bot, chatId, "Один или несколько файлов слишком большие для загрузки. Максимальный размер: 50MB.");
         return true;
       }
-
       if (error instanceof MediaFetchError) {
         await safeSendMessage(bot, chatId, `Не удалось загрузить файл: ${error.message}`);
         return false;
       }
-
-      const errorMessage = error.message || String(error);
-
-      if (errorMessage.includes("413 Request Entity Too Large")) {
-        for (let i = 0; i < mediaBuffers.length; i++) {
-          const { buffer } = mediaBuffers[i];
-          try {
-            if (mediaType === "video") {
-              await safeSendVideo(bot, chatId, buffer, { caption: i === 0 ? BOT_TAG : undefined, disable_notification: true });
-            }
-            else {
-              await safeSendPhoto(bot, chatId, buffer, { caption: i === 0 ? BOT_TAG : undefined, disable_notification: true });
-            }
-            if (i < mediaBuffers.length - 1) await new Promise(r => setTimeout(r, 200));
-          }
-          catch (e: any) {
-            console.error(`Failed to send individual ${mediaType} ${i}:`, e);
-          }
-        }
-        continue;
-      }
-
       if (isBotBlockedError(error)) return false;
-
-      await sendErrorToAdmin(
-        bot,
-        error,
-        `sendMediaGroup ${mediaType}s`,
-        undefined,
-        chatId,
-        username
-      );
+      await sendErrorToAdmin(bot, error, `sendMediaGroup ${mediaType}s`, undefined, chatId, username);
       return false;
     }
   }
