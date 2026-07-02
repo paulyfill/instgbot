@@ -186,7 +186,9 @@ export const processSocialMedia = async (
 
     const videos = media.filter((m) => m.type === "video");
     const photos = media.filter((m) => m.type === "image");
-    const postUrl = message.split("?")[0].replace(/\/$/, "");
+
+    const isEphemeralStoriesPage = /instagram\.com\/stories\/[^/]+\/?$/.test(message.split("?")[0]);
+    const postUrl = isEphemeralStoriesPage ? undefined : message.split("?")[0].replace(/\/$/, "");
     let hasSuccessfulDownload = false;
     let photoProcessed = false;
     let videoProcessed = false;
