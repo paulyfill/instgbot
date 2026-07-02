@@ -22,10 +22,22 @@ type PendingDownload = {
   url: string;
   title: string;
   availableQualities: number[];
-  estimatedMB: Record<number, number>; // quality → MB
+  sizeMB: Record<number, number>;
+  downloadUrls: Record<number, string>;
 };
 
 export const pendingYouTube = new Map<number, PendingDownload>();
+
+const fetchActualSizeMB = async (cdnUrl: string): Promise<number> => {
+  try {
+    const head = await fetch(cdnUrl, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+    const cl = head.headers.get("content-length");
+    return cl ? Math.round(parseInt(cl) / 1024 / 1024) : 0;
+  }
+  catch {
+    return 0;
+  }
+};
 
 export const sendYouTubeQualityPicker = async (
   bot: TelegramBot,
@@ -34,47 +46,65 @@ export const sendYouTubeQualityPicker = async (
   username?: string
 ) => {
   try {
-    const probe = await yt.ytmp4(url, 360);
+    await withChatAction(bot, chatId, "typing", async () => {
+      const probe = await yt.ytmp4(url, 360);
 
-    if (!probe?.download?.status) {
-      await safeSendMessage(bot, chatId, "Не удалось получить информацию о видео.");
-      return;
-    }
+      if (!probe?.download?.status) {
+        await safeSendMessage(bot, chatId, "Не удалось получить информацию о видео.");
+        return;
+      }
 
-    const title: string = probe.metadata?.title ?? "YouTube видео";
-    const qualities: number[] = probe.download.availableQuality ?? [360];
-    const durationSec: number = probe.metadata?.seconds ?? 0;
+      const title: string = probe.metadata?.title ?? "YouTube видео";
+      const qualities: number[] = probe.download.availableQuality ?? [360];
 
-    const videoBitrates: Record<number, number> = { 144: 150, 360: 500, 480: 1000, 720: 2500, 1080: 5000 };
-    const calcMB = (kbps: number) => durationSec ? (kbps * durationSec) / 8 / 1024 : 0;
+      // Parallel fetch CDN URLs + actual sizes for all video qualities
+      const qualityData = await Promise.all(
+        qualities.map(async (q) => {
+          try {
+            const res = q === 360 ? probe : await yt.ytmp4(url, q);
+            const cdnUrl: string = res?.download?.url ?? "";
+            const mb = cdnUrl ? await fetchActualSizeMB(cdnUrl) : 0;
+            return { q, cdnUrl, mb };
+          }
+          catch {
+            return { q, cdnUrl: "", mb: 0 };
+          }
+        })
+      );
 
-    const estimatedMB: Record<number, number> = {};
-    qualities.forEach(q => { estimatedMB[q] = calcMB(videoBitrates[q] ?? 1000); });
-
-    pendingYouTube.set(chatId, { url, title, availableQualities: qualities, estimatedMB });
-    setTimeout(() => pendingYouTube.delete(chatId), 5 * 60 * 1000);
-
-    const fmtSize = (mb: number) => mb <= 0 ? null : mb >= 1024 ? `~${(mb / 1024).toFixed(1)} ГБ` : `~${Math.round(mb)} МБ`;
-
-    const videoButtons = qualities
-      .filter(q => !durationSec || estimatedMB[q] < 2048)
-      .map(q => {
-        const size = fmtSize(estimatedMB[q]);
-        const cached = getCachedFileId(url, `yt_v_${q}`) ? "⚡ " : "";
-        return [{ text: `${cached}🎬 ${q}p${size ? ` (${size})` : ""}`, callback_data: `yt:${chatId}:v:${q}` }];
+      const sizeMB: Record<number, number> = {};
+      const downloadUrls: Record<number, string> = {};
+      qualityData.forEach(({ q, cdnUrl, mb }) => {
+        sizeMB[q] = mb;
+        downloadUrls[q] = cdnUrl;
       });
 
-    const audioBitrates: Record<number, number> = { 128: 128, 320: 320 };
-    const audioButtons = [128, 320].map(q => {
-      const size = fmtSize(calcMB(audioBitrates[q]));
-      const cached = getCachedFileId(url, `yt_a_${q}`) ? "⚡ " : "";
-      return [{ text: `${cached}🎵 MP3 ${q}kbps${size ? ` (${size})` : ""}`, callback_data: `yt:${chatId}:a:${q}` }];
-    });
+      pendingYouTube.set(chatId, { url, title, availableQualities: qualities, sizeMB, downloadUrls });
+      setTimeout(() => pendingYouTube.delete(chatId), 5 * 60 * 1000);
 
-    await bot.sendMessage(chatId, `🎬 <b>${title}</b>\n\nВыберите формат:\n<i>Максимум в Telegram — 2 ГБ</i>`, {
-      parse_mode: "HTML",
-      reply_markup: { inline_keyboard: [...videoButtons, ...audioButtons] }
-    });
+      const fmtSize = (mb: number) => mb <= 0 ? null : mb >= 1024 ? `${(mb / 1024).toFixed(1)} ГБ` : `${mb} МБ`;
+
+      const videoButtons = qualities
+        .filter(q => sizeMB[q] <= 0 || sizeMB[q] < 2048)
+        .map(q => {
+          const size = fmtSize(sizeMB[q]);
+          const cached = getCachedFileId(url, `yt_v_${q}`) ? "⚡ " : "";
+          return [{ text: `${cached}🎬 ${q}p${size ? ` (${size})` : ""}`, callback_data: `yt:${chatId}:v:${q}` }];
+        });
+
+      const durationSec: number = probe.metadata?.seconds ?? 0;
+      const calcAudioMB = (kbps: number) => durationSec ? Math.round((kbps * durationSec) / 8 / 1024) : 0;
+      const audioButtons = [128, 320].map(q => {
+        const size = fmtSize(calcAudioMB(q));
+        const cached = getCachedFileId(url, `yt_a_${q}`) ? "⚡ " : "";
+        return [{ text: `${cached}🎵 MP3 ${q}kbps${size ? ` (${size})` : ""}`, callback_data: `yt:${chatId}:a:${q}` }];
+      });
+
+      await bot.sendMessage(chatId, `🎬 <b>${title}</b>\n\nВыберите формат:\n<i>Максимум в Telegram — 2 ГБ</i>`, {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [...videoButtons, ...audioButtons] }
+      });
+    }); // end withChatAction
   }
   catch (error) {
     await safeSendMessage(bot, chatId, "Не удалось получить информацию о видео.");
@@ -105,10 +135,10 @@ export const handleYouTubeCallback = async (
   }
 
   pendingYouTube.delete(chatId);
-  const { url, title, estimatedMB } = pending;
+  const { url, title, sizeMB, downloadUrls } = pending;
   const cacheKey = url;
   const cacheType = `yt_${type}_${quality}`;
-  const isLarge = type === "v" && (estimatedMB[quality] ?? 0) > GRAMMY_LIMIT_MB;
+  const isLarge = type === "v" && (sizeMB[quality] ?? 0) > GRAMMY_LIMIT_MB;
 
   try {
     if (type === "a") {
@@ -132,8 +162,9 @@ export const handleYouTubeCallback = async (
       return;
     }
 
-    // Video
-    const result = await yt.ytmp4(url, quality);
+    // Video — use cached CDN URL from picker, fallback to fresh fetch
+    const cachedCdnUrl = downloadUrls[quality];
+    const result = cachedCdnUrl ? { download: { url: cachedCdnUrl } } : await yt.ytmp4(url, quality);
     if (!result?.download?.url) throw new Error("No video URL");
 
     if (isLarge) {

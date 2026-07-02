@@ -52,7 +52,7 @@ export async function downloadStoryById ({
       await safeSendPhoto(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true });
     }
     else {
-      await safeSendVideo(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true });
+      await safeSendVideo(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true, supports_streaming: true });
     }
 
     if (loadingMsg) await safeDeleteMessage(bot, chatId, loadingMsg.message_id);
@@ -111,7 +111,7 @@ const sendPostMedia = async (
       await safeSendPhoto(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true });
     }
     else {
-      await safeSendVideo(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true });
+      await safeSendVideo(bot, chatId, mediaResult, { caption: BOT_TAG, disable_notification: true, supports_streaming: true });
     }
     return true;
   }
