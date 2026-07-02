@@ -27,7 +27,7 @@ export const processYouTubeShorts = async (
       await safeSendVideo(bot, chatId, cachedFileId, {
         caption: BOT_TAG,
         disable_notification: true,
-        supports_streaming: true,
+        supports_streaming: true
       } as any);
       recordDownload(chatId, message, platform, "video", true, username, firstName);
       return;
@@ -44,7 +44,7 @@ export const processYouTubeShorts = async (
           const msg = await grammyApi.sendVideo(chatId, new InputFile(stream, "video.mp4"), {
             caption: BOT_TAG,
             disable_notification: true,
-            supports_streaming: true,
+            supports_streaming: true
           } as any);
           setCachedFileId(postUrl, "video", 0, msg.video.file_id);
         });
